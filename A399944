@@ -1,0 +1,96 @@
+import math
+from multiprocessing import Pool, cpu_count
+
+
+# ---------- prime numbers ----------
+def primes_up_to(n):
+    sieve = bytearray(b"\x01") * (n + 1)
+    sieve[0:2] = b"\x00\x00"
+
+    for i in range(2, int(n**0.5) + 1):
+        if sieve[i]:
+            sieve[i*i:n+1:i] = b"\x00" * ((n - i*i)//i + 1)
+
+    return [i for i in range(2, n + 1) if sieve[i]]
+
+
+# ---------- worker ----------
+def process_block(args):
+    L, R, primes = args
+    size = R - L
+
+    sigma = [1] * size       # sigma(n) - sum of divisors
+    phi   = [1] * size       # phi(n) - Euler's totient function
+    tau   = [1] * size       # tau(n) - number of divisors
+    rem   = [L + i for i in range(size)]
+
+    for p in primes:
+        start = ((L + p - 1) // p) * p
+
+        if start >= R:
+            continue
+
+        for x in range(start, R, p):
+            i = x - L
+            a = 0
+
+            while rem[i] % p == 0:
+                rem[i] //= p
+                a += 1
+
+            if a:
+                p_pow = p ** a
+
+                # sigma(p^a) = 1 + p + p^2 + ... + p^a
+                sigma[i] *= (p_pow * p - 1) // (p - 1)
+
+                # phi(p^a) = p^a - p^(a-1)
+                phi[i] *= p_pow - p_pow // p
+
+                # tau(p^a) = a + 1
+                tau[i] *= a + 1
+
+    # If a prime factor > 1 remains
+    for i in range(size):
+        if rem[i] > 1:
+            p = rem[i]
+
+            # sigma(p) = p + 1
+            sigma[i] *= p + 1
+
+            # phi(p) = p - 1
+            phi[i] *= p - 1
+
+            # tau(p) = 2
+            tau[i] *= 2
+
+    # Check:
+    # sigma(n) = phi(n) + tau(n)
+    return [
+        L + i
+        for i in range(size)
+        if sigma[i] == phi[i] + tau[i]**5
+    ]
+
+
+# ---------- main ----------
+if __name__ == "__main__":
+    START = 1
+    END   = 1_000_000_000
+    BLOCK = 10_000_000
+    CORES = min(cpu_count(), 4)
+
+    primes = primes_up_to(int(math.isqrt(END)) + 1)
+
+    tasks = []
+
+    for L in range(START, END, BLOCK):
+        R = min(L + BLOCK, END)
+        tasks.append((L, R, primes))
+
+    with Pool(CORES) as pool:
+        results = pool.map(process_block, tasks)
+
+    all_matches = [x for block in results for x in block]
+
+    print("Found n:", all_matches)
